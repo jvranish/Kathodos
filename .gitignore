@@ -1,0 +1,8 @@
+origData/
+media/
+levels/
+data/
+*.pyc
+*~
+*.zip
+*.7z
