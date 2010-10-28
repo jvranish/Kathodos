@@ -4,6 +4,7 @@ from pandac.PandaModules import *
 from direct.gui.OnscreenText import OnscreenText
 from direct.actor.Actor import Actor
 from direct.showbase.DirectObject import DirectObject
+from joystick import *
 import sys
 # import random, sys, os, math
 
@@ -27,9 +28,9 @@ class World(DirectObject):
       laser.removeNode()
       self.laserHitPlayer.play()
       #print "hit ship"
-      
+
+
     def __init__(self):
-        
         self.keyMap = {"left":0, "right":0, "forward":0, "cam-left":0, "cam-right":0}
         base.win.setClearColor(Vec4(0,0,0,1))
 
@@ -168,6 +169,9 @@ class World(DirectObject):
         #
         base.camera.lookAt(self.playerShip.actorNodePath)
 
+        # Create joystick handler
+        self.joy = JoystickHandler()
+
         # Accept the control keys for movement and rotation
         #def addAxisControlKeys(namePos, nameNeg, stateName):
         #  def set
@@ -176,17 +180,49 @@ class World(DirectObject):
         #  self.accept(namePos + "-up", setControlState, [stateName, -1.0])
         def setControlState(name, value):
           self.__dict__[name] = value
+        def setHatState(left, right, up, down, value):
+          self.__dict__[left] = False
+          self.__dict__[right] = False
+          self.__dict__[up] = False
+          self.__dict__[down] = False
+
+          (x,y) = value
+
+          if x == -1:
+            self.__dict__[left] = True
+          elif x == 1:
+            self.__dict__[right] = True
+
+          if y == -1:
+            self.__dict__[down] = True
+          elif y == 1:
+            self.__dict__[up] = True
+
         def addControlKey(keyName, stateName):
           setControlState(stateName, False)
           self.accept(keyName, setControlState, [stateName, True])
           self.accept(keyName + "-up", setControlState, [stateName, False])
+
+        def addHatKey(keyName, left, right, up, down):
+          self.accept(keyName, setHatState, [left, right, up, down])
 
         self.accept("escape", sys.exit)
         addControlKey("a", "moveLeft")
         addControlKey("d", "moveRight")
         addControlKey("w", "moveUp")
         addControlKey("s", "moveDown")
-        
+
+        # Hard coded joystick controls
+        addControlKey("joystick0-button6", "moveBackward")
+        addControlKey("joystick0-button7", "moveForward")
+        addControlKey("joystick0-button5", "fireOn")
+        addControlKey("joystick0-button2", "yawLeft")
+        addControlKey("joystick0-button1", "yawRight")
+        addControlKey("joystick0-button3", "pitchUp")
+        addControlKey("joystick0-button0", "pitchDown")
+        # Specify the actions to take for each direction of the hat
+        addHatKey("joystick0-hat0", "moveLeft", "moveRight", "moveUp", "moveDown")
+
         addControlKey("4", "yawLeft")
         addControlKey("6", "yawRight")
         addControlKey("8", "pitchUp")
@@ -202,7 +238,6 @@ class World(DirectObject):
         taskMgr.add(self.move, "moveTask")
         print taskMgr
 
-
         # Create some lighting
         ambientLight = AmbientLight("ambientLight")
         ambientLight.setColor(Vec4(.3, .3, .3, 1))
@@ -216,6 +251,7 @@ class World(DirectObject):
         self.clock = ClockObject()
         base.setFrameRateMeter(True)
         #self.count = 0
+
     # Accepts arrow keys to move either the player or the menu cursor,
     # Also deals with grid checking and collision detection
     def move(self, task):
@@ -243,6 +279,7 @@ class World(DirectObject):
       #self.playerShip.forceNodePath.setHpr(rotation)
       #self.playerShip.forceNodePath.setPos(translation)
       
+
       forward = Vec3(0.0, -1.0, 0.0)
       left = Vec3(1.0, 0.0, 0.0)
       up = Vec3(0.0, 0.0, 1.0)
@@ -259,7 +296,7 @@ class World(DirectObject):
         moveAmount += up
       if self.moveDown:
         moveAmount -= up
-      
+
       currentVelocity = self.playerShip.actorNode.getPhysicsObject().getVelocity()
       #print currentVelocity
       moveAmount = Vec3(lcs.xformVec(moveAmount))
