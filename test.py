@@ -32,6 +32,7 @@ class World(DirectObject):
 
     def __init__(self):
         self.keyMap = {"left":0, "right":0, "forward":0, "cam-left":0, "cam-right":0}
+        self.axisData = Vec3(0.0,0.0,0.0)
         base.win.setClearColor(Vec4(0,0,0,1))
 
         base.disableMouse()
@@ -198,6 +199,14 @@ class World(DirectObject):
           elif y == 1:
             self.__dict__[up] = True
 
+        def setAxisState(name, value):
+          if name == 'x':
+            self.axisData[0] = -value
+          elif name == 'y':
+            self.axisData[1] = -value
+          elif name == 'z':
+            self.axisData[2] = -value
+
         def addControlKey(keyName, stateName):
           setControlState(stateName, False)
           self.accept(keyName, setControlState, [stateName, True])
@@ -205,6 +214,12 @@ class World(DirectObject):
 
         def addHatKey(keyName, left, right, up, down):
           self.accept(keyName, setHatState, [left, right, up, down])
+
+        def addAxis(joyName):
+          self.accept(joyName + '-axis0', setAxisState, ['x'])
+          self.accept(joyName + '-axis1', setAxisState, ['y'])
+          self.accept(joyName + '-axis3', setAxisState, ['z'])
+
 
         self.accept("escape", sys.exit)
         addControlKey("a", "moveLeft")
@@ -222,6 +237,7 @@ class World(DirectObject):
         addControlKey("joystick0-button0", "pitchDown")
         # Specify the actions to take for each direction of the hat
         addHatKey("joystick0-hat0", "moveLeft", "moveRight", "moveUp", "moveDown")
+        addAxis("joystick0")
 
         addControlKey("4", "yawLeft")
         addControlKey("6", "yawRight")
@@ -317,6 +333,10 @@ class World(DirectObject):
       pitch = Vec3(0.0, 1.0, 0.0)
       roll = Vec3(0.0, 0.0, 1.0)
       rotateAmount = Vec3(0.0, 0.0, 0.0)
+
+      # Joystick data
+      rotateAmount = self.axisData
+
       if self.yawLeft:
         rotateAmount += heading
       if self.yawRight:
