@@ -25,13 +25,12 @@ class JoystickHandler:
     pygame.init()
 
     self.joy = []
-    self.axis_state = {}
 
     # Enumerate all game devices recognized
     self.enumerateDevices()
 
     taskMgr.add(self.pollInputDevice, 'JoystickTask')
-
+    
   def enumerateDevices(self):
     '''
     Creates and initializes a Joystick object for each game
@@ -46,7 +45,6 @@ class JoystickHandler:
     for device in range(pygame.joystick.get_count()):
       joystick = pygame.joystick.Joystick(device)
       joystick.init()
-      self.axis_state[joystick.get_id()] = [0.5] * joystick.get_numaxes()
         
       self.joy.append(joystick)
 
@@ -99,7 +97,6 @@ class JoystickHandler:
         messenger.send(name, [event.value])
       elif event.type is JOYAXISMOTION:
         name = 'joystick%d-axis%d' % (event.joy, event.axis)
-        self.axis_state[event.joy][event.axis] = event.value
         messenger.send(name, [event.value])
       elif event.type is JOYBALLMOTION:
         name = 'joystick%d-ball%d' % (event.joy, event.hat)
@@ -107,6 +104,6 @@ class JoystickHandler:
 
       # Left in for debug purposes until a menu is implemented
       # to map the buttons to actions
-      print name
+      #print name
 
     return task.cont

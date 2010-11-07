@@ -9,12 +9,51 @@ import sys
 # import random, sys, os, math
 
 
+class PlayerIntent:
+  def __init__(self, playerNum, fireOn = False, thrusters = Vec3(0.0, 0.0, 0.0), rotThrusters = Vec3(0.0, 0.0, 0.0)):
+    self.playerNum = playerNum
+    self.fireOn = fireOn
+    self.thrusters = Vec3(thrusters)
+    self.rotThrusters = Vec3(rotThrusters)
+    
+  def __add__(self, other):
+    return PlayerIntent( self.playerNum
+                       , self.fireOn or other.fireOn
+                       , Vec3(tuple([max((-1.0, min((1.0, x)))) for x in self.thrusters + other.thrusters]))
+                       , Vec3(tuple([max((-1.0, min((1.0, x)))) for x in self.rotThrusters + other.rotThrusters]))
+                       )
+  
+  #these functions are helper functions 
+  # for event handling
+  def setFireOn(self, a): self.fireOn = a
+  
+  def setForwardThruster(self, x):  self.thrusters[1] = -x
+  def setLeftThruster(self, x):     self.thrusters[0] = x
+  def setUpThruster(self, x):       self.thrusters[2] = x      
+  
+  def setHeadingThruster(self, x): self.rotThrusters[0] = x  #aka Yaw
+  def setPitchThruster(self, x):   self.rotThrusters[1] = x
+  def setRollThruster(self, x):    self.rotThrusters[2] = x
+  
+  # call processIntent on player object
+  def process(self, world):
+    world.players[self.playerNum].processIntent(self, world)
+  
+
 def clampVector(v, maxLength):
   if v.length() > maxLength:
     v.normalize()
     return v * maxLength
   else:
     return v
+    
+def neg(x):
+  return -x
+    
+def compose(f, g):
+  def fg(x):
+    return f(g(x))
+  return fg
 
 class World(DirectObject):
 
@@ -28,8 +67,10 @@ class World(DirectObject):
       laser.removeNode()
       self.laserHitPlayer.play()
       #print "hit ship"
-
-
+      
+    def time2frames(self, t):
+      return int(round(t/self.clock.getDt()))
+      
     def __init__(self):
         self.keyMap = {"left":0, "right":0, "forward":0, "cam-left":0, "cam-right":0}
         self.axisData = Vec3(0.0,0.0,0.0)
@@ -39,18 +80,9 @@ class World(DirectObject):
         base.enableParticles()
         angleInt = AngularEulerIntegrator() # add angular integrator to the physics manager (for rotational physics)
         base.physicsMgr.attachAngularIntegrator(angleInt)
-
-
+        
         self.environ = loader.loadModel("levels/minerva")
         self.environ.reparentTo(render)
-        #self.environ.setPos(0,0,0)
-        #self.environ.setTag("MyTag", '0')
-        #self.environ.setCollideMask(BitMask32.bit(1))
-        #self.environ.setCollideMask(BitMask32.bit(0)) # BitMask32.bit(0)
-        #print self.environ.getChild(0).getChild(0).getChildren()
-        #self.environ.node().setFromCollideMask(GeomNode.getDefaultCollideMask())
-        #self.environ.node().setFromCollideMask(GeomNode.getDefaultCollideMask()).setIntoCollideMask(0)
-        
 
         self.cHandler = PhysicsCollisionHandler()
 
@@ -58,12 +90,8 @@ class World(DirectObject):
         self.cTrav.setRespectPrevTransform( True )
         #self.cTrav.showCollisions(render)
         
-        
         self.pHandler = CollisionHandlerEvent()
         self.pHandler.addInPattern('%fn-into-%in')
-        #self.cHandler.addCollider(
-        #self.cHandler.addCollider(collideNode, actorNodePath)
-        #self.cTrav.addCollider(self.environ, self.pHandler)
         self.accept('laser-bounds-into-player-player1-bounds', self.handleLaserHitShip)
         self.accept('laser-bounds-into-level', self.handleLaserHitLevel)
         
@@ -71,6 +99,9 @@ class World(DirectObject):
         self.laserHitWall = base.loader.loadSfx("media/sound/explode1.wav")
         self.laserHitPlayer = base.loader.loadSfx("media/sound/shit01.wav")
         
+        #TODO this is lame, but just getting ready for the new architecture
+        self.joystickIntent = PlayerIntent(0)
+        self.keyboardIntent = PlayerIntent(0)
         
         class Player:
           def __init__(player, name, pos):
@@ -91,23 +122,6 @@ class World(DirectObject):
             modelNode.setHpr(180.0, 0.0, 0.0)
             
             
-            #thrusterForce = LinearVectorForce(0, 0, 0)
-            #thrusterForce.setMassDependent(1)
-            
-            #rotThrusterForce = AngularVectorForce(0, 0, 0)
-
-            #forceNode = ForceNode('player-thrusters') # Attach a thruster force
-            #forceNode.addForce(thrusterForce)
-            #forceNode.addForce(rotThrusterForce)
-            
-            
-            #thrusterForceNodePath = modelNode.attachNewNode(forceNode)
-            #forceNodePath = render.attachNewNode(forceNode)
-            #actorNode.getPhysical(0).setViscosity(0.1)
-            #actorNode.getPhysical(0).addAngularForce(rotThrusterForce)
-            #actorNode.getPhysical(0).addLinearForce(thrusterForce)
-            
-            
             boundingSphere = CollisionNode('player-' + name + '-bounds')
             boundingSphere.addSolid(CollisionSphere(0, 0, 0, 2))
             collideNode = actorNodePath.attachNewNode(boundingSphere)
@@ -122,9 +136,6 @@ class World(DirectObject):
             player.modelNode = modelNode
             player.collideNode = collideNode
             player.laserCool = 0.0
-            #player.thrusterForce = thrusterForce
-            #player.rotThrusterForce = rotThrusterForce
-            #player.forceNodePath  = forceNodePath
             
           def createLaserProjectile(player):
             laser = PandaNode("laserProjectile")
@@ -161,8 +172,30 @@ class World(DirectObject):
             
             nodePath.wrtReparentTo(render)
           
+          #TODO add a filter for multiple intent packets for a single player
+          def processIntent(player, intent, world):
+            if intent.fireOn:
+              if world.clock.getFrameCount() >= player.laserCool:
+                player.createLaserProjectile()
+                player.laserCool = world.clock.getFrameCount() + world.time2frames(0.4)
+
+            lcs = player.actorNodePath.getMat()
+
+            currentVelocity = player.actorNode.getPhysicsObject().getVelocity()
+            desiredVelocity = Vec3(lcs.xformVec(intent.thrusters)) * 80.0
+            deltaVel = desiredVelocity - currentVelocity
+            #TODO, there are a lot of arbitrary number here,
+            #  we should group them mostly in one place and label their units
+            maxAccel = 10.0
+            
+            thrust = clampVector(deltaVel * 0.1, maxAccel)
+            player.actorNode.getPhysicsObject().addImpulse(thrust)
+                        
+            h, p, r = intent.rotThrusters * 1.5 * world.clock.getDt() * 100.0 # TODO fix this world.dt
+            player.actorNode.getPhysicsObject().addLocalTorque(LRotationf(h, p, r)*0.1)
+          
         self.playerShip = Player("player1", Vec3(0,-40,0))
-        
+        self.players = [self.playerShip]
        
         
         base.camera.reparentTo( self.playerShip.actorNodePath)
@@ -173,83 +206,52 @@ class World(DirectObject):
         # Create joystick handler
         self.joy = JoystickHandler()
 
-        # Accept the control keys for movement and rotation
-        #def addAxisControlKeys(namePos, nameNeg, stateName):
-        #  def set
-        #  setControlState(stateName, 0.0)
-        #  self.accept(namePos, setControlState, [stateName, 1.0])
-        #  self.accept(namePos + "-up", setControlState, [stateName, -1.0])
-        def setControlState(name, value):
-          self.__dict__[name] = value
-        def setHatState(left, right, up, down, value):
-          self.__dict__[left] = False
-          self.__dict__[right] = False
-          self.__dict__[up] = False
-          self.__dict__[down] = False
+        def addControlKey(keyName, f):
+          self.accept(keyName, f, [True])
+          self.accept(keyName + "-up", f, [False])
+          
+        def addKeyAxis(keyA, keyB, f):
+          def magic(a, b, x = [0.0, 0.0]):
+            if a != None: x[0] = a
+            if b != None: x[1] = b
+            f(sum(x))
+          self.accept(keyA, magic, [1.0, None])
+          self.accept(keyA + "-up", magic, [0.0, None])
+          self.accept(keyB, magic, [None, -1.0])
+          self.accept(keyB + "-up", magic, [None, 0.0])
 
-          (x,y) = value
+        def addHatAxis(hatName, setLeftRight, setUpDown, f = lambda x: x, g = lambda x: x):
+          def h((leftRight, upDown)):
+            setLeftRight(f(leftRight))
+            setUpDown(g(upDown))
+          self.accept(hatName, h)
 
-          if x == -1:
-            self.__dict__[left] = True
-          elif x == 1:
-            self.__dict__[right] = True
+        def addAxis(joyAxisName, f, g = lambda x: x):
+          self.accept(joyAxisName, compose(f, g))
 
-          if y == -1:
-            self.__dict__[down] = True
-          elif y == 1:
-            self.__dict__[up] = True
-
-        def setAxisState(name, value):
-          if name == 'x':
-            self.axisData[0] = -value
-          elif name == 'y':
-            self.axisData[1] = -value
-          elif name == 'z':
-            self.axisData[2] = -value
-
-        def addControlKey(keyName, stateName):
-          setControlState(stateName, False)
-          self.accept(keyName, setControlState, [stateName, True])
-          self.accept(keyName + "-up", setControlState, [stateName, False])
-
-        def addHatKey(keyName, left, right, up, down):
-          self.accept(keyName, setHatState, [left, right, up, down])
-
-        def addAxis(joyName):
-          self.accept(joyName + '-axis0', setAxisState, ['x'])
-          self.accept(joyName + '-axis1', setAxisState, ['y'])
-          self.accept(joyName + '-axis3', setAxisState, ['z'])
-
-
+          
         self.accept("escape", sys.exit)
-        addControlKey("a", "moveLeft")
-        addControlKey("d", "moveRight")
-        addControlKey("w", "moveUp")
-        addControlKey("s", "moveDown")
-
-        # Hard coded joystick controls
-        addControlKey("joystick0-button6", "moveBackward")
-        addControlKey("joystick0-button7", "moveForward")
-        addControlKey("joystick0-button5", "fireOn")
-        addControlKey("joystick0-button2", "yawLeft")
-        addControlKey("joystick0-button1", "yawRight")
-        addControlKey("joystick0-button3", "pitchUp")
-        addControlKey("joystick0-button0", "pitchDown")
-        # Specify the actions to take for each direction of the hat
-        addHatKey("joystick0-hat0", "moveLeft", "moveRight", "moveUp", "moveDown")
-        addAxis("joystick0")
-
-        addControlKey("4", "yawLeft")
-        addControlKey("6", "yawRight")
-        addControlKey("8", "pitchUp")
-        addControlKey("5", "pitchDown")
-        addControlKey("7", "rollLeft")
-        addControlKey("9", "rollRight")
         
-        addControlKey("+", "moveForward")
-        addControlKey("enter", "moveBackward")
+        addKeyAxis("a", "d", self.keyboardIntent.setLeftThruster)
+        addKeyAxis("w", "s", self.keyboardIntent.setUpThruster)
+        addKeyAxis("+", "enter", self.keyboardIntent.setForwardThruster)
+    
+        addKeyAxis("4", "6", self.keyboardIntent.setHeadingThruster)
+        addKeyAxis("8", "5", self.keyboardIntent.setPitchThruster)
+        addKeyAxis("7", "8", self.keyboardIntent.setRollThruster)
+        addControlKey("space", self.keyboardIntent.setFireOn)
+
+        # Hard coded joystick controls (Ron's config)
+        #addKeyAxis("joystick0-button7", "joystick0-button6", self.keyboardIntent.setForwardThruster)
+        #addKeyAxis("joystick0-button2", "joystick0-button1", self.keyboardIntent.setHeadingThruster)
+        #addKeyAxis("joystick0-button3", "joystick0-button0", self.keyboardIntent.setPitchThruster)
         
-        addControlKey("space", "fireOn")
+        addAxis("joystick0-axis0", self.joystickIntent.setHeadingThruster, neg)
+        addAxis("joystick0-axis1", self.joystickIntent.setPitchThruster, neg)
+        addAxis("joystick0-axis2", self.joystickIntent.setForwardThruster, neg)
+        addHatAxis("joystick0-hat0", self.joystickIntent.setLeftThruster, self.joystickIntent.setUpThruster, neg)
+        addControlKey("joystick0-button0", self.joystickIntent.setFireOn)
+        
 
         taskMgr.add(self.move, "moveTask")
         print taskMgr
@@ -265,109 +267,24 @@ class World(DirectObject):
         render.setLight(render.attachNewNode(directionalLight))
         base.cTrav = self.cTrav
         self.clock = ClockObject()
+        self.clock.setMode(self.clock.MNonRealTime)
+        self.clock.setFrameRate(60.0)
         base.setFrameRateMeter(True)
         #self.count = 0
 
     # Accepts arrow keys to move either the player or the menu cursor,
     # Also deals with grid checking and collision detection
     def move(self, task):
-      #md = base.win.getPointer(0) 
-      #x = md.getX() 
-      #y = md.getY() 
-      #if base.win.movePointer(0, base.win.getXSize()/2, base.win.getYSize()/2): 
-      #  pass
-      if self.fireOn:# and self.bla:
-        if task.time >= self.playerShip.laserCool:
-          self.playerShip.createLaserProjectile()
-          self.playerShip.laserCool = task.time + 0.4
-  
-      #print self.count
-      #if not self.fireOn:
-      #  self.bla = True
-      
-      #forward = self.playerShip.getPos() - base.camera.getPos(render)
-      #forward.normalize()
-      
-      rotation = self.playerShip.actorNodePath.getHpr(render)
-      translation = self.playerShip.actorNodePath.getPos(render)
-      lcs = self.playerShip.actorNodePath.getMat()
-      #print rotation
-      #self.playerShip.forceNodePath.setHpr(rotation)
-      #self.playerShip.forceNodePath.setPos(translation)
-      
-
-      forward = Vec3(0.0, -1.0, 0.0)
-      left = Vec3(1.0, 0.0, 0.0)
-      up = Vec3(0.0, 0.0, 1.0)
-      moveAmount = Vec3(0.0, 0.0, 0.0)
-      if self.moveForward:
-        moveAmount += forward
-      if self.moveBackward:
-        moveAmount -= forward
-      if self.moveLeft:
-        moveAmount += left
-      if self.moveRight:
-        moveAmount -= left
-      if self.moveUp:
-        moveAmount += up
-      if self.moveDown:
-        moveAmount -= up
-
-      currentVelocity = self.playerShip.actorNode.getPhysicsObject().getVelocity()
-      #print currentVelocity
-      moveAmount = Vec3(lcs.xformVec(moveAmount))
-      desiredVelocity = moveAmount * 80.0
-      deltaVel = desiredVelocity - currentVelocity
-      
-      maxAccel = 10.0
-      #desiredCloseTime = 0.2 # *(1.0/desiredCloseTime)
-      if deltaVel.length():
-        thrust = clampVector(deltaVel * 0.1, maxAccel)
-        #print thrust.length()
-        #print "DeltaVel", deltaVel, currentVelocity, thrust
-        #self.playerShip.actorNode.getPhysicsObject().addImpulse(Vec3(lcs.xformVec(thrust)))
-        self.playerShip.actorNode.getPhysicsObject().addImpulse(thrust)
-        #self.playerShip.thrusterForce.setVector(thrust*mass)
-      
-      heading = Vec3(1.0, 0.0, 0.0)
-      pitch = Vec3(0.0, 1.0, 0.0)
-      roll = Vec3(0.0, 0.0, 1.0)
-      rotateAmount = Vec3(0.0, 0.0, 0.0)
-
-      # Joystick data
-      rotateAmount = self.axisData
-
-      if self.yawLeft:
-        rotateAmount += heading
-      if self.yawRight:
-        rotateAmount -= heading
-      if self.pitchUp:
-        rotateAmount += pitch
-      if self.pitchDown:
-        rotateAmount -= pitch
-      if self.rollLeft:
-        rotateAmount += roll
-      if self.rollRight:
-        rotateAmount -= roll
-      
-      h, p, r = rotateAmount * 1.5 * self.clock.getDt() * 100.0
-      #desiredRotation = LRotationf()
-      #desiredRotation.setHpr(rotateAmount * 0.9)
-      #temp = LRotationf()
-      #temp.setHpr(rotation)
-      #desiredRotation = temp * desiredRotation
-      
-      #currentRotation = self.playerShip.actorNode.getPhysicsObject().getRotation()
-      #deltaRotation = desiredRotation #- currentRotation
-      self.playerShip.actorNode.getPhysicsObject().addLocalTorque(LRotationf(h, p, r)*0.1)
-      #self.playerShip.rotThrusterForce.setHpr(h, p, r)
-
+      self.processFrame([self.keyboardIntent + self.joystickIntent])
       #self.cTrav.traverse(render)
-      self.clock.tick()
 
       return task.cont
-
-
+      
+    def processFrame(self, frameEvents):
+      for event in frameEvents:
+        event.process(self)
+      self.clock.tick()
+  
 w = World()
 run()
 
