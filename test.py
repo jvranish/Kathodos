@@ -7,6 +7,9 @@ from direct.showbase.DirectObject import DirectObject
 from joystick import *
 import sys
 # import random, sys, os, math
+import time
+from direct.stdpy import threading
+#import threading
 
 
 class PlayerIntent:
@@ -55,6 +58,11 @@ def compose(f, g):
     return f(g(x))
   return fg
 
+def startNewThread(target, args = (), kwargs = {}):
+    thread = threading.Thread(target = target, args = args, kwargs = kwargs)
+    thread.start()
+    return thread
+    
 class World(DirectObject):
 
     def handleLaserHitLevel(self, entry):
@@ -71,10 +79,23 @@ class World(DirectObject):
     def time2frames(self, t):
       return int(round(t/self.clock.getDt()))
       
+    def timeTest(self):
+      #task.delayTime = 0.5
+      while True:
+        print "Time %.4f" % (time.time() - self.lasttime)
+        self.lasttime = time.time()
+        #time.sleep(0.3)
+        #return task.again
+      
     def __init__(self):
         self.keyMap = {"left":0, "right":0, "forward":0, "cam-left":0, "cam-right":0}
         self.axisData = Vec3(0.0,0.0,0.0)
         base.win.setClearColor(Vec4(0,0,0,1))
+        self.lasttime = time.time()
+        startNewThread(self.timeTest)
+        #print Thread.isThreadingSupported()
+        #taskMgr.setupTaskChain('testChain', numThreads = 2)
+        #taskMgr.add(self.timeTest, 'timetest', taskChain = 'testChain')
 
         base.disableMouse()
         base.enableParticles()
@@ -184,7 +205,7 @@ class World(DirectObject):
             currentVelocity = player.actorNode.getPhysicsObject().getVelocity()
             desiredVelocity = Vec3(lcs.xformVec(intent.thrusters)) * 80.0
             deltaVel = desiredVelocity - currentVelocity
-            #TODO, there are a lot of arbitrary number here,
+            #TODO, there are a lot of arbitrary numbers here,
             #  we should group them mostly in one place and label their units
             maxAccel = 10.0
             
@@ -211,7 +232,7 @@ class World(DirectObject):
           self.accept(keyName + "-up", f, [False])
           
         def addKeyAxis(keyA, keyB, f):
-          def magic(a, b, x = [0.0, 0.0]):
+          def magic(a, b, x = [0.0, 0.0]): # this function keeps the state of x around
             if a != None: x[0] = a
             if b != None: x[1] = b
             f(sum(x))
@@ -254,6 +275,8 @@ class World(DirectObject):
         
 
         taskMgr.add(self.move, "moveTask")
+        taskMgr.add(self.doPhys, "collTask", sort = 30)
+        
         print taskMgr
 
         # Create some lighting
@@ -265,7 +288,7 @@ class World(DirectObject):
         directionalLight.setSpecularColor(Vec4(1, 1, 1, 1))
         render.setLight(render.attachNewNode(ambientLight))
         render.setLight(render.attachNewNode(directionalLight))
-        base.cTrav = self.cTrav
+        #base.cTrav = self.cTrav
         self.clock = ClockObject()
         self.clock.setMode(self.clock.MNonRealTime)
         self.clock.setFrameRate(60.0)
@@ -278,6 +301,10 @@ class World(DirectObject):
       self.processFrame([self.keyboardIntent + self.joystickIntent])
       #self.cTrav.traverse(render)
 
+      return task.cont
+      
+    def doPhys(self, task):
+      self.cTrav.traverse(render)
       return task.cont
       
     def processFrame(self, frameEvents):
