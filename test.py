@@ -241,11 +241,11 @@ class World(DirectObject):
         
         addKeyAxis("a", "d", self.keyboardIntent.setLeftThruster)
         addKeyAxis("w", "s", self.keyboardIntent.setUpThruster)
-        addKeyAxis("+", "enter", self.keyboardIntent.setForwardThruster)
+        addKeyAxis("t", "enter", self.keyboardIntent.setForwardThruster)
     
         addKeyAxis("4", "6", self.keyboardIntent.setHeadingThruster)
         addKeyAxis("8", "5", self.keyboardIntent.setPitchThruster)
-        addKeyAxis("7", "8", self.keyboardIntent.setRollThruster)
+        addKeyAxis("7", "9", self.keyboardIntent.setRollThruster)
         addControlKey("space", self.keyboardIntent.setFireOn)
 
         # Hard coded joystick controls (Ron's config)
