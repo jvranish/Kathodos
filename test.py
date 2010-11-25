@@ -198,7 +198,7 @@ class World(DirectObject):
                 thrust = clampVector(deltaVel * 0.1, maxAccel)
                 player.actorNode.getPhysicsObject().addImpulse(thrust)
                             
-                h, p, r = intent.rotThrusters * 1.5 # TODO fix this world.dt
+                h, p, r = intent.rotThrusters * 1.5
                 player.actorNode.getPhysicsObject().addLocalTorque(LRotationf(h, p, r)*0.1)
           
         self.playerShip = Player("player1", Vec3(0,-40,0))
@@ -261,6 +261,7 @@ class World(DirectObject):
         
 
         taskMgr.add(self.doPhys, "physFrameTask", sort = 30)
+        taskMgr.add(self.doNetworking, "networking")
         
         print taskMgr
 
@@ -280,7 +281,9 @@ class World(DirectObject):
         base.setFrameRateMeter(True)
 
         #self.count = 0
-
+    def doNetworking(self, task):
+        
+        return task.cont
       
     def doPhys(self, task):
         self.processFrame([self.keyboardIntent + self.joystickIntent])
@@ -289,8 +292,9 @@ class World(DirectObject):
     def processFrame(self, frameEvents):
         for event in frameEvents:
             event.process(self)
-        self.physicsMgr.doPhysics(globalClock.getDt())
+        self.physicsMgr.doPhysics(self.clock.getDt())
         self.cTrav.traverse(render)
+        print self.clock.getDt()
         self.clock.tick()
   
 w = World()
