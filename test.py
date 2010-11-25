@@ -3,28 +3,30 @@ from panda3d.core import *
 from pandac.PandaModules import *
 from direct.gui.OnscreenText import OnscreenText
 from direct.actor.Actor import Actor
-from direct.showbase.DirectObject import DirectObject
+from direct.showbase.DirectObject import * #DirectObject, globalClock
 from joystick import *
 import sys
 # import random, sys, os, math
+#from pandac.PandaModules import Thread as PandaThread
+
 import time
-from direct.stdpy import threading
+#from direct.stdpy import pandaThreads
 #import threading
 
 
 class PlayerIntent:
   def __init__(self, playerNum, fireOn = False, thrusters = Vec3(0.0, 0.0, 0.0), rotThrusters = Vec3(0.0, 0.0, 0.0)):
-    self.playerNum = playerNum
-    self.fireOn = fireOn
-    self.thrusters = Vec3(thrusters)
-    self.rotThrusters = Vec3(rotThrusters)
+      self.playerNum = playerNum
+      self.fireOn = fireOn
+      self.thrusters = Vec3(thrusters)
+      self.rotThrusters = Vec3(rotThrusters)
     
   def __add__(self, other):
-    return PlayerIntent( self.playerNum
-                       , self.fireOn or other.fireOn
-                       , Vec3(tuple([max((-1.0, min((1.0, x)))) for x in self.thrusters + other.thrusters]))
-                       , Vec3(tuple([max((-1.0, min((1.0, x)))) for x in self.rotThrusters + other.rotThrusters]))
-                       )
+      return PlayerIntent( self.playerNum
+                         , self.fireOn or other.fireOn
+                         , Vec3(tuple([max((-1.0, min((1.0, x)))) for x in self.thrusters + other.thrusters]))
+                         , Vec3(tuple([max((-1.0, min((1.0, x)))) for x in self.rotThrusters + other.rotThrusters]))
+                         )
   
   #these functions are helper functions 
   # for event handling
@@ -40,67 +42,50 @@ class PlayerIntent:
   
   # call processIntent on player object
   def process(self, world):
-    world.players[self.playerNum].processIntent(self, world)
+      world.players[self.playerNum].processIntent(self, world)
   
 
 def clampVector(v, maxLength):
   if v.length() > maxLength:
-    v.normalize()
-    return v * maxLength
+      v.normalize()
+      return v * maxLength
   else:
-    return v
+      return v
     
 def neg(x):
-  return -x
+    return -x
     
 def compose(f, g):
-  def fg(x):
-    return f(g(x))
-  return fg
-
-def startNewThread(target, args = (), kwargs = {}):
-    thread = threading.Thread(target = target, args = args, kwargs = kwargs)
-    thread.start()
-    return thread
-    
+    def fg(x):
+        return f(g(x))
+    return fg
+  
 class World(DirectObject):
 
     def handleLaserHitLevel(self, entry):
-      laser = entry.getFromNodePath()
-      laser.removeNode()
-      self.laserHitWall.play()
-      #print "hit level"
+        laser = entry.getFromNodePath()
+        laser.removeNode()
+        self.laserHitWall.play()
+        #print "hit level"
     def handleLaserHitShip(self, entry):
-      laser = entry.getFromNodePath()
-      laser.removeNode()
-      self.laserHitPlayer.play()
-      #print "hit ship"
+        laser = entry.getFromNodePath()
+        laser.removeNode()
+        self.laserHitPlayer.play()
+        #print "hit ship"
       
     def time2frames(self, t):
-      return int(round(t/self.clock.getDt()))
-      
-    def timeTest(self):
-      #task.delayTime = 0.5
-      while True:
-        print "Time %.4f" % (time.time() - self.lasttime)
-        self.lasttime = time.time()
-        #time.sleep(0.3)
-        #return task.again
+        return int(round(t/self.clock.getDt()))
       
     def __init__(self):
         self.keyMap = {"left":0, "right":0, "forward":0, "cam-left":0, "cam-right":0}
         self.axisData = Vec3(0.0,0.0,0.0)
         base.win.setClearColor(Vec4(0,0,0,1))
-        self.lasttime = time.time()
-        startNewThread(self.timeTest)
-        #print Thread.isThreadingSupported()
-        #taskMgr.setupTaskChain('testChain', numThreads = 2)
-        #taskMgr.add(self.timeTest, 'timetest', taskChain = 'testChain')
 
         base.disableMouse()
-        base.enableParticles()
-        angleInt = AngularEulerIntegrator() # add angular integrator to the physics manager (for rotational physics)
-        base.physicsMgr.attachAngularIntegrator(angleInt)
+        self.physicsMgr = PhysicsManager()
+        #base.enableParticles()
+        self.physicsMgr.attachLinearIntegrator(LinearEulerIntegrator())
+        self.physicsMgr.attachAngularIntegrator(AngularEulerIntegrator()) # add angular integrator to the physics manager (for rotational physics)
         
         self.environ = loader.loadModel("levels/minerva")
         self.environ.reparentTo(render)
@@ -109,6 +94,7 @@ class World(DirectObject):
 
         self.cTrav = CollisionTraverser()
         self.cTrav.setRespectPrevTransform( True )
+        
         #self.cTrav.showCollisions(render)
         
         self.pHandler = CollisionHandlerEvent()
@@ -125,95 +111,95 @@ class World(DirectObject):
         self.keyboardIntent = PlayerIntent(0)
         
         class Player:
-          def __init__(player, name, pos):
-            nodePath = NodePath(PandaNode("playerShipNode"))
-            nodePath.reparentTo(render)
-            actorNode = ActorNode("playerShip-physics")
-            actorNode.getPhysicsObject().setMass(2000.0) # two metric tons
-            #actorNode.getPhysicsObject().setTerminalVelocity(150.0)
+            def __init__(player, name, pos):
+                nodePath = NodePath(PandaNode("playerShipNode"))
+                nodePath.reparentTo(render)
+                actorNode = ActorNode("playerShip-physics")
+                actorNode.getPhysicsObject().setMass(2000.0) # two metric tons
+                #actorNode.getPhysicsObject().setTerminalVelocity(150.0)
+                
+                self.physicsMgr.attachPhysicalNode(actorNode)
+                
+                actorNodePath = nodePath.attachNewNode(actorNode)
+                actorNodePath.setPos(pos)
+                
+                modelNode = loader.loadModel("media/models/Fighter")
+                modelNode.reparentTo(actorNodePath)
+                modelNode.setScale(0.1)
+                modelNode.setHpr(180.0, 0.0, 0.0)
+                
+                
+                boundingSphere = CollisionNode('player-' + name + '-bounds')
+                boundingSphere.addSolid(CollisionSphere(0, 0, 0, 2))
+                collideNode = actorNodePath.attachNewNode(boundingSphere)
+                #collideNode.show()
+                
+                self.cHandler.addCollider(collideNode, actorNodePath)
+                self.cTrav.addCollider(collideNode, self.cHandler)
+                
+                player.nodePath = nodePath
+                player.actorNode = actorNode
+                player.actorNodePath = actorNodePath
+                player.modelNode = modelNode
+                player.collideNode = collideNode
+                player.laserCool = 0.0
             
-            base.physicsMgr.attachPhysicalNode(actorNode)
-            
-            actorNodePath = nodePath.attachNewNode(actorNode)
-            actorNodePath.setPos(pos)
-            
-            modelNode = loader.loadModel("media/models/Fighter")
-            modelNode.reparentTo(actorNodePath)
-            modelNode.setScale(0.1)
-            modelNode.setHpr(180.0, 0.0, 0.0)
-            
-            
-            boundingSphere = CollisionNode('player-' + name + '-bounds')
-            boundingSphere.addSolid(CollisionSphere(0, 0, 0, 2))
-            collideNode = actorNodePath.attachNewNode(boundingSphere)
-            #collideNode.show()
-            
-            self.cHandler.addCollider(collideNode, actorNodePath)
-            self.cTrav.addCollider(collideNode, self.cHandler)
-            
-            player.nodePath = nodePath
-            player.actorNode = actorNode
-            player.actorNodePath = actorNodePath
-            player.modelNode = modelNode
-            player.collideNode = collideNode
-            player.laserCool = 0.0
-            
-          def createLaserProjectile(player):
-            laser = PandaNode("laserProjectile")
-            self.laserSound.play()
-            velocity = Vec3(0.0, -120.0, 0.0) #-120
-            nodePath = player.actorNodePath.attachNewNode(laser)
+            def createLaserProjectile(player):
+                laser = PandaNode("laserProjectile")
+                self.laserSound.play()
+                velocity = Vec3(0.0, -120.0, 0.0) #-120
+                nodePath = player.actorNodePath.attachNewNode(laser)
 
-            actorNode = ActorNode("projectile-laser")
-            actorNode.getPhysicsObject().setVelocity(velocity)
-            #actorNode.setPos(0.0, -3.0, 0.0)
+                actorNode = ActorNode("projectile-laser")
+                actorNode.getPhysicsObject().setVelocity(velocity)
+                #actorNode.setPos(0.0, -3.0, 0.0)
+                
+                self.physicsMgr.attachPhysicalNode(actorNode)
+                
+                actorNodePath = nodePath.attachNewNode(actorNode)
+                actorNodePath.setPos(0.0, -3.0, 0.0)
+                
+                modelNode = NodePath(PandaNode("laserNode"))
+                modelNode.reparentTo(actorNodePath)
+                #modelNode.setPos(0.0, -2.0, 0.0)
+                  
+                pointA = Point3(0.0, 0.0, 0.0)
+                pointB = Point3(0.0, -1.0, 0.0)
+                boundingObject = CollisionNode('laser-bounds')
+                #boundingObject.addSolid(CollisionSegment(pointA, pointB))
+                boundingObject.addSolid(CollisionSphere(0.0, 0.0, 0.0, 0.1))
+                boundingObject.setIntoCollideMask(0)
+                collideNode = actorNodePath.attachNewNode(boundingObject)
+                collideNode.show()
+                
+                #self.cHandler.addCollider(collideNode, actorNodePath)
+                #self.cTrav.addCollider(collideNode, self.cHandler)
+                
+                self.cTrav.addCollider(collideNode, self.pHandler)
+                
+                nodePath.wrtReparentTo(render)
             
-            base.physicsMgr.attachPhysicalNode(actorNode)
-            
-            actorNodePath = nodePath.attachNewNode(actorNode)
-            actorNodePath.setPos(0.0, -3.0, 0.0)
-            
-            modelNode = NodePath(PandaNode("laserNode"))
-            modelNode.reparentTo(actorNodePath)
-            #modelNode.setPos(0.0, -2.0, 0.0)
-              
-            pointA = Point3(0.0, 0.0, 0.0)
-            pointB = Point3(0.0, -1.0, 0.0)
-            boundingObject = CollisionNode('laser-bounds')
-            #boundingObject.addSolid(CollisionSegment(pointA, pointB))
-            boundingObject.addSolid(CollisionSphere(0.0, 0.0, 0.0, 0.1))
-            boundingObject.setIntoCollideMask(0)
-            collideNode = actorNodePath.attachNewNode(boundingObject)
-            collideNode.show()
-            
-            #self.cHandler.addCollider(collideNode, actorNodePath)
-            #self.cTrav.addCollider(collideNode, self.cHandler)
-            
-            self.cTrav.addCollider(collideNode, self.pHandler)
-            
-            nodePath.wrtReparentTo(render)
-          
-          #TODO add a filter for multiple intent packets for a single player
-          def processIntent(player, intent, world):
-            if intent.fireOn:
-              if world.clock.getFrameCount() >= player.laserCool:
-                player.createLaserProjectile()
-                player.laserCool = world.clock.getFrameCount() + world.time2frames(0.4)
+            #TODO add a filter for multiple intent packets for a single player
+            def processIntent(player, intent, world):
+                if intent.fireOn:
+                    if world.clock.getFrameCount() >= player.laserCool:
+                        player.createLaserProjectile()
+                        player.laserCool = world.clock.getFrameCount() + world.time2frames(0.4)
 
-            lcs = player.actorNodePath.getMat()
+                lcs = player.actorNodePath.getMat()
 
-            currentVelocity = player.actorNode.getPhysicsObject().getVelocity()
-            desiredVelocity = Vec3(lcs.xformVec(intent.thrusters)) * 80.0
-            deltaVel = desiredVelocity - currentVelocity
-            #TODO, there are a lot of arbitrary numbers here,
-            #  we should group them mostly in one place and label their units
-            maxAccel = 10.0
-            
-            thrust = clampVector(deltaVel * 0.1, maxAccel)
-            player.actorNode.getPhysicsObject().addImpulse(thrust)
-                        
-            h, p, r = intent.rotThrusters * 1.5 * world.clock.getDt() * 100.0 # TODO fix this world.dt
-            player.actorNode.getPhysicsObject().addLocalTorque(LRotationf(h, p, r)*0.1)
+                currentVelocity = player.actorNode.getPhysicsObject().getVelocity()
+                desiredVelocity = Vec3(lcs.xformVec(intent.thrusters)) * 80.0
+                deltaVel = desiredVelocity - currentVelocity
+                #TODO, there are a lot of arbitrary numbers here,
+                #  we should group them mostly in one place and label their units
+                maxAccel = 10.0
+                
+                thrust = clampVector(deltaVel * 0.1, maxAccel)
+                player.actorNode.getPhysicsObject().addImpulse(thrust)
+                            
+                h, p, r = intent.rotThrusters * 1.5 # TODO fix this world.dt
+                player.actorNode.getPhysicsObject().addLocalTorque(LRotationf(h, p, r)*0.1)
           
         self.playerShip = Player("player1", Vec3(0,-40,0))
         self.players = [self.playerShip]
@@ -228,27 +214,27 @@ class World(DirectObject):
         self.joy = JoystickHandler()
 
         def addControlKey(keyName, f):
-          self.accept(keyName, f, [True])
-          self.accept(keyName + "-up", f, [False])
+            self.accept(keyName, f, [True])
+            self.accept(keyName + "-up", f, [False])
           
         def addKeyAxis(keyA, keyB, f):
-          def magic(a, b, x = [0.0, 0.0]): # this function keeps the state of x around
-            if a != None: x[0] = a
-            if b != None: x[1] = b
-            f(sum(x))
-          self.accept(keyA, magic, [1.0, None])
-          self.accept(keyA + "-up", magic, [0.0, None])
-          self.accept(keyB, magic, [None, -1.0])
-          self.accept(keyB + "-up", magic, [None, 0.0])
+            def magic(a, b, x = [0.0, 0.0]): # this function keeps the state of x around
+                if a != None: x[0] = a
+                if b != None: x[1] = b
+                f(sum(x))
+            self.accept(keyA, magic, [1.0, None])
+            self.accept(keyA + "-up", magic, [0.0, None])
+            self.accept(keyB, magic, [None, -1.0])
+            self.accept(keyB + "-up", magic, [None, 0.0])
 
         def addHatAxis(hatName, setLeftRight, setUpDown, f = lambda x: x, g = lambda x: x):
-          def h((leftRight, upDown)):
-            setLeftRight(f(leftRight))
-            setUpDown(g(upDown))
-          self.accept(hatName, h)
+            def h((leftRight, upDown)):
+                setLeftRight(f(leftRight))
+                setUpDown(g(upDown))
+            self.accept(hatName, h)
 
         def addAxis(joyAxisName, f, g = lambda x: x):
-          self.accept(joyAxisName, compose(f, g))
+            self.accept(joyAxisName, compose(f, g))
 
           
         self.accept("escape", sys.exit)
@@ -274,8 +260,7 @@ class World(DirectObject):
         addControlKey("joystick0-button0", self.joystickIntent.setFireOn)
         
 
-        taskMgr.add(self.move, "moveTask")
-        taskMgr.add(self.doPhys, "collTask", sort = 30)
+        taskMgr.add(self.doPhys, "physFrameTask", sort = 30)
         
         print taskMgr
 
@@ -293,24 +278,20 @@ class World(DirectObject):
         self.clock.setMode(self.clock.MNonRealTime)
         self.clock.setFrameRate(60.0)
         base.setFrameRateMeter(True)
+
         #self.count = 0
 
-    # Accepts arrow keys to move either the player or the menu cursor,
-    # Also deals with grid checking and collision detection
-    def move(self, task):
-      self.processFrame([self.keyboardIntent + self.joystickIntent])
-      #self.cTrav.traverse(render)
-
-      return task.cont
       
     def doPhys(self, task):
-      self.cTrav.traverse(render)
-      return task.cont
+        self.processFrame([self.keyboardIntent + self.joystickIntent])
+        return task.cont
       
     def processFrame(self, frameEvents):
-      for event in frameEvents:
-        event.process(self)
-      self.clock.tick()
+        for event in frameEvents:
+            event.process(self)
+        self.physicsMgr.doPhysics(globalClock.getDt())
+        self.cTrav.traverse(render)
+        self.clock.tick()
   
 w = World()
 run()
