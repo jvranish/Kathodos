@@ -17,6 +17,8 @@ import time
 #from direct.stdpy import pandaThreads
 
 #TODO fix networking handler
+#TODO fix collision handler names (we have an event handler and a physics handler)
+#TODO separate out controls code
 
 def MyActor(*args, **kwargs):
   x = ActorNode(*args, **kwargs)
@@ -51,11 +53,6 @@ class PlayerIntent:
   def setHeadingThruster(self, x): self.rotThrusters[0] = x  #aka Yaw
   def setPitchThruster(self, x):   self.rotThrusters[1] = x
   def setRollThruster(self, x):    self.rotThrusters[2] = x
-  
-  # call processIntent on player object
-  def process(self, world):
-      world.players[self.playerId].intent = self
-      #world.players[self.playerId].processIntent(self)
   
 
 def clampVector(v, maxLength):
@@ -144,17 +141,22 @@ class ActorState(StateSaver):
         
 class Player:
     def __init__(self, playerId, world, name, pos):
-        self.world = world
         self.playerId = playerId
-        nodePath = NodePath(PandaNode("playerShipNode"))
+        self.laserCool = 0.0
+        self.name = name
+        
+        self.populateScene(playerId, world, pos)
+        
+    #TODO move this to the addPlayer function
+    def populateScene(self, playerId, world, pos):
+        nodePath = NodePath(PandaNode("player-node"))
         nodePath.setTag("player", str(playerId))
         nodePath.reparentTo(world.root)
-        actorNode = MyActor("playerShip-physics")
+        actorNode = MyActor("player-actor")
         actorNode.getPhysicsObject().setMass(2000.0) # two metric tons
-        #actorNode.getPhysicsObject().setTerminalVelocity(150.0)
         
         #TODO handle this more neatly somehow
-        self.world.physicsMgr.attachPhysicalNode(actorNode)
+        world.physicsMgr.attachPhysicalNode(actorNode)
         
         actorNodePath = nodePath.attachNewNode(actorNode)
         actorNodePath.setPos(pos)
@@ -162,58 +164,47 @@ class Player:
         modelNode = loader.loadModel("media/models/Fighter")
         modelNode.reparentTo(actorNodePath)
         modelNode.setScale(0.1)
-        modelNode.setHpr(180.0, 0.0, 0.0)
+        modelNode.setHpr(180.0, 0.0, 0.0)        
         
-        
-        boundingSphere = CollisionNode('player-' + name + '-bounds')
+        boundingSphere = CollisionNode('player-bounds')
         boundingSphere.addSolid(CollisionSphere(0, 0, 0, 2))
         collideNode = actorNodePath.attachNewNode(boundingSphere)
-        collideNode.setTag("collides", "handle")
-        #collideNode.show()
+        collideNode.setTag("collides", "player")
         
-        self.world.cHandler.addCollider(collideNode, actorNodePath)
-        self.world.cTrav.addCollider(collideNode, self.world.cHandler)
+        world.cHandler.addCollider(collideNode, actorNodePath)
+        world.cTrav.addCollider(collideNode, world.cHandler)
         
-        self.nodePath = nodePath
-        self.actorNode = actorNode
-        self.actorNodePath = actorNodePath
-        self.modelNode = modelNode
-        self.collideNode = collideNode
-        self.laserCool = 0.0
-        self.intent = PlayerIntent(self.playerId)
+        nodePath.setTag("hasPythonObj", "")
+        nodePath.setPythonTag("pythonObj", self)
         
-        
-        
-    #def saveState(self):
-    #  return 
+        return nodePath
     
     #TODO add a filter for multiple intent packets for a single player
-    def processIntent(self):
-        if self.intent.fireOn:
-            if self.world.clock.getFrameCount() >= self.laserCool:
-                self.world.createLaserProjectile(self)
-                self.laserCool = self.world.clock.getFrameCount() + self.world.time2frames(0.4)
+    def processIntent(self, world, intent, actorNodePath):
+        if intent.fireOn:
+            if world.clock.getFrameCount() >= self.laserCool:
+                world.createLaserProjectile(self, actorNodePath)
+                self.laserCool = world.clock.getFrameCount() + world.time2frames(0.4)
 
-        lcs = self.actorNodePath.getMat()
-
-        currentVelocity = self.actorNode.getPhysicsObject().getVelocity()
-        desiredVelocity = Vec3(lcs.xformVec(self.intent.thrusters)) * 80.0
+        currentVelocity = actorNodePath.node().getPhysicsObject().getVelocity()
+        desiredVelocity = Vec3(actorNodePath.getMat().xformVec(intent.thrusters)) * 80.0
         deltaVel = desiredVelocity - currentVelocity
         #TODO, there are a lot of arbitrary numbers here,
         #  we should group them mostly in one place and label their units
         maxAccel = 10.0
         
         thrust = clampVector(deltaVel * 0.1, maxAccel)
-        self.actorNode.getPhysicsObject().addImpulse(thrust)
+        actorNodePath.node().getPhysicsObject().addImpulse(thrust)
                     
-        h, p, r = self.intent.rotThrusters * 1.5
-        self.actorNode.getPhysicsObject().addLocalTorque(LRotationf(h, p, r)*0.1)
+        h, p, r = intent.rotThrusters * 1.5
+        actorNodePath.node().getPhysicsObject().addLocalTorque(LRotationf(h, p, r)*0.1)
         
 handler = None
 
 class World(DirectObject):
 
     def handleLaserHitLevel(self, entry):
+        #TODO check to see if this is high enough
         laser = entry.getFromNodePath()
         laser.removeNode()
         self.laserHitWall.play()
@@ -227,6 +218,7 @@ class World(DirectObject):
     def time2frames(self, t):
         return int(round(t/self.clock.getDt()))
         
+    #TODO remove these and the input events
     def doSaves(self, a):
       #asdf = ActorNode(PandaNode("test"))
       if self.lastSave == None:
@@ -239,24 +231,21 @@ class World(DirectObject):
     def save(self):
       for actor in self.root.findAllMatches("**/=actor"):
         actor.setTag("actor", pickle.dumps(ActorState(actor.node())))
+      for hasPythonObj in self.root.findAllMatches("**/=hasPythonObj"):
+        hasPythonObj.setTag("hasPythonObj", pickle.dumps(hasPythonObj.getPythonTag("pythonObj")))
       return pickle.dumps(self.root)
         
     def restore(self, data):
-      #clear colliders
-      self.cHandler.clearColliders()
-      self.cTrav.clearColliders()
-      
-      self.physicsMgr.clearPhysicals()
-      
-      #clear any old lights
-      for light in self.root.findAllMatches("**/*Light"):
-        self.root.clearLight(light)
-      
       
       self.root.removeNode()
       
       self.root = pickle.loads(data)
       self.root.reparentTo(self.render)
+      
+      #restore embedded python objects
+      for hasPythonObj in self.root.findAllMatches("**/=hasPythonObj"):
+        hasPythonObj.setPythonTag("pythonObj", pickle.loads(hasPythonObj.getTag("hasPythonObj")))
+        hasPythonObj.setTag("hasPythonObj", "")
       
       #restore ActorNodes
       for actor in self.root.findAllMatches("**/=actor"):
@@ -264,9 +253,34 @@ class World(DirectObject):
         newActor = MyActor(actor.getName())
         newActor.replaceNode(actor.node())
         actorState.restore(newActor)
-
+        
+      self.checkDynamicObjects()
+    #this method makes sure various entities are in sync with their dynamic components
+    # it chesk that the camera is set correctly,
+    #  the lights, 
+    #  colliders,
+    #  etc..
+    #  this is generally a safe call to make
+    def checkDynamicObjects(self):
+      #clear colliders
+      self.cHandler.clearColliders()
+      self.cTrav.clearColliders()
+      
+      self.physicsMgr = PhysicsManager()
+        
+        #base.enableParticles()
+      self.physicsMgr.attachLinearIntegrator(LinearEulerIntegrator())
+      self.physicsMgr.attachAngularIntegrator(AngularEulerIntegrator())
+      #self.physicsMgr.clearPhysicals()
+      #self.physicsMgr.clearAngularForces()
+      #self.physicsMgr.clearLinearForces()
+      
+      #clear any old lights
+      for light in self.root.findAllMatches("**/*Light"):
+        self.root.clearLight(light)
+        
       #restore camera
-      playerShipActorNodePath = self.root.find("**/=player=%i/playerShip-physics" % (self.playerId))
+      playerShipActorNodePath = self.root.find("**/=player=%i/player-actor" % (self.playerId))
       base.camera.reparentTo(playerShipActorNodePath)
       base.camera.setPos(Vec3(0,20,5))
       base.camera.lookAt(playerShipActorNodePath)
@@ -280,50 +294,33 @@ class World(DirectObject):
       #restore collision traversers
       for collider in self.root.findAllMatches("**/=collides"):
         self.physicsMgr.attachPhysicalNode(collider.getParent().node())
-        if collider.getTag("collides") == "handle":
+        if collider.getTag("collides") == "player":
           self.cHandler.addCollider(collider, collider.getParent())
           self.cTrav.addCollider(collider, self.cHandler)
-        else:
+        elif collider.getTag("collides") == "projectile":
           self.cTrav.addCollider(collider, self.pHandler)
       
     def addPlayer(self, playerId, name):
-        playerShip = Player(playerId, self, name, Vec3(0,-40,0))
-        self.players[playerId] = playerShip
-        print "New Player!", playerId
-        if playerId == self.playerId:
-          base.camera.reparentTo(playerShip.actorNodePath)
-          base.camera.setPos(Vec3(0,20,5))
-          base.camera.lookAt(playerShip.actorNodePath)
+        Player(playerId, self, name, Vec3(0,-40,0))
           
-    def createLaserProjectile(self, player):
-        laser = PandaNode("laserProjectile")
+    def createLaserProjectile(self, player, playerActorNodePath):
         self.laserSound.play()
-        velocity = Vec3(0.0, -120.0, 0.0) #-120
-        nodePath = player.actorNodePath.attachNewNode(laser)
+        nodePath = playerActorNodePath.attachNewNode(PandaNode("projectile-laser-node"))
 
-        actorNode = MyActor("projectile-laser")
-        actorNode.getPhysicsObject().setVelocity(velocity)
-        
-        #actorNode.setPos(0.0, -3.0, 0.0)
+        actorNode = MyActor("projectile-laser-actor")
+        actorNode.getPhysicsObject().setVelocity(Vec3(0.0, -120.0, 0.0))
         
         self.physicsMgr.attachPhysicalNode(actorNode)
         
         actorNodePath = nodePath.attachNewNode(actorNode)
         actorNodePath.setPos(0.0, -3.0, 0.0)
         
-        modelNode = NodePath(PandaNode("laserNode"))
-        modelNode.reparentTo(actorNodePath)
-        #modelNode.setPos(0.0, -2.0, 0.0)
-          
-        #pointA = Point3(0.0, 0.0, 0.0)
-        #pointB = Point3(0.0, -1.0, 0.0)
-        boundingObject = CollisionNode('laser-bounds')
-        #boundingObject.addSolid(CollisionSegment(pointA, pointB))
+        boundingObject = CollisionNode('projectile-laser-bounds')
         boundingObject.addSolid(CollisionSphere(0.0, 0.0, 0.0, 0.1))
         boundingObject.setIntoCollideMask(0)
         collideNode = actorNodePath.attachNewNode(boundingObject)
         collideNode.show()
-        collideNode.setTag("collides", "trav")
+        collideNode.setTag("collides", "projectile")
         
         #self.cHandler.addCollider(collideNode, actorNodePath)
         #self.cTrav.addCollider(collideNode, self.cHandler)
@@ -331,23 +328,6 @@ class World(DirectObject):
         self.cTrav.addCollider(collideNode, self.pHandler)
         
         nodePath.wrtReparentTo(self.root)
-        #def printGraph(node):
-        #  print node
-        #  print node.node().getClassType()
-        #  for child in node.getChildren():
-        #    printGraph(child)
-        #printGraph(self.root)
-        #self.root.ls()
-        #test = pickle.dumps(render)
-        #test = pickle.loads(test)
-        #print printGraph(test)
-        #test = pickle.dumps(actorNode.getPhysicsObject().getVelocity())
-        #b = pickle.loads(test)
-        #print b
-        #myworld = pickle.loads(sceneGraph)
-        #render.removeChildren()
-        #render.reparentTo(pickle.loads(sceneGraph))
-        #self.root.removeNode()
         
       
     def __init__(self, render):
@@ -376,7 +356,6 @@ class World(DirectObject):
           
           
 
-        self.players = {}
         base.disableMouse()
         self.physicsMgr = PhysicsManager()
         
@@ -396,8 +375,8 @@ class World(DirectObject):
         
         self.pHandler = CollisionHandlerEvent()
         self.pHandler.addInPattern('%fn-into-%in')
-        self.accept('laser-bounds-into-player-player1-bounds', self.handleLaserHitShip)
-        self.accept('laser-bounds-into-level', self.handleLaserHitLevel)
+        self.accept('projectile-laser-bounds-into-player-bounds', self.handleLaserHitShip)
+        self.accept('projectile-laser-bounds-into-level', self.handleLaserHitLevel)
         
         self.laserSound = base.loader.loadSfx("media/sound/laser02.wav")
         self.laserHitWall = base.loader.loadSfx("media/sound/explode1.wav")
@@ -475,14 +454,21 @@ class World(DirectObject):
         directionalLight.setDirection(Vec3(-5, -5, -5))
         directionalLight.setColor(Vec4(1, 1, 1, 1))
         directionalLight.setSpecularColor(Vec4(1, 1, 1, 1))
-        self.root.setLight(self.root.attachNewNode(ambientLight))
-        self.root.setLight(self.root.attachNewNode(directionalLight))
+        #self.root.setLight(self.root.attachNewNode(ambientLight))
+        #self.root.setLight(self.root.attachNewNode(directionalLight))
         #base.cTrav = self.cTrav
         self.clock = ClockObject()
         self.clock.setMode(self.clock.MNonRealTime)
         self.clock.setFrameRate(60.0)
         base.setFrameRateMeter(True)
         
+        #TODO, I think the only usefull thing this is doing here is setting the camera,
+        # perhaps pull that out do it in it's own function
+        self.checkDynamicObjects()
+        
+    def applyIntent(self, intent):
+      playerActorNodePath = self.root.find("**/=player=%i/player-actor" % (intent.playerId))
+      playerActorNodePath.getParent().getPythonTag("pythonObj").processIntent(self, intent, playerActorNodePath)
 
     def doNetworking(self, task):
         while not self.networkHandler.incoming.empty():
@@ -492,9 +478,12 @@ class World(DirectObject):
               intent.playerId = playerId # just to make sure the other client isn't lieing to us
               if frame not in self.frames:
                   self.frames[frame] = []
-              self.frames[frame].append(intent)
+              self.frames[frame].append(lambda:self.applyIntent(intent))
           elif tag == "PlayerJoined":
               self.addPlayer(playerId, data)
+              #self.networkHandler.sendGamePacket(("LevelSync", pickle.dumps(currentIntent)))
+          elif tag == "LevelSync":
+              pass
           elif tag == "NewFrame":
               lastFrame = frame -1
               if lastFrame in self.frames:
@@ -506,14 +495,11 @@ class World(DirectObject):
       
     def doPhys(self, task):
         currentIntent = self.keyboardIntent + self.joystickIntent
-        if self.players[self.playerId].intent != currentIntent:
-          if self.multiplayer:
-            self.networkHandler.sendGamePacket(("PlayerUpdate", pickle.dumps(currentIntent)))
-          else:
-            self.frameQueue.append([currentIntent])
+
+        if self.multiplayer:
+          self.networkHandler.sendGamePacket(("PlayerUpdate", pickle.dumps(currentIntent)))
         else:
-          if not self.multiplayer:
-            self.frameQueue.append([])
+          self.frameQueue.append([lambda:self.applyIntent(currentIntent)])
           
         #TODO add something here so that we leave an extra frame of delay that we can use
         #  when a frame is delayed from the server (actually the way I'm doing the frames like this is kinda bad)
@@ -523,9 +509,7 @@ class World(DirectObject):
       
     def processFrame(self, frameEvents):
         for event in frameEvents:
-            event.process(self)
-        for player in self.players.values():
-            player.processIntent()
+            event()
         self.physicsMgr.doPhysics(self.clock.getDt())
         self.cTrav.traverse(self.render)
         self.clock.tick()
