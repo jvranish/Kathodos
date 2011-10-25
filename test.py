@@ -337,8 +337,8 @@ class World(DirectObject):
         self.keyMap = {"left":0, "right":0, "forward":0, "cam-left":0, "cam-right":0}
         self.axisData = Vec3(0.0,0.0,0.0)
         base.win.setClearColor(Vec4(0,0,0,1))
-        
-        self.multiplayer = False
+
+        self.multiplayer = len(sys.argv) > 1
         self.frameQueue = []
         self.frames = {}
         
