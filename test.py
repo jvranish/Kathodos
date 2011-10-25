@@ -346,7 +346,7 @@ class World(DirectObject):
         
         if self.multiplayer:
           #TODO, this is kinda a lame setup, no error handling, etc...
-          self.networkHandler = NetworkingHandler(hnet.connectTCP('localhost', 30131))
+          self.networkHandler = NetworkingHandler(hnet.connectTCP(sys.argv[1], 6112))
           self.networkHandler.run()
           self.networkHandler.gameJoined.wait(1.0)
           handler = self.networkHandler
