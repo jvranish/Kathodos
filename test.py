@@ -87,8 +87,8 @@ class NetworkingHandler(hnet.HNetHandler):
         self.gameJoined.set()
         self.done.wait()                
             
-    def sendGamePacket(self, stuff):
-        self.obj.sendGamePacket(self.gameName, stuff)
+    def sendGamePacket(self, stuff, dstPlayerId = None):
+        self.obj.sendGamePacket(self.gameName, stuff, dstPlayerId)
         
     def onRecv(self, packet):
         self.incoming.put(packet.msg())
@@ -353,7 +353,10 @@ class World(DirectObject):
           self.playerId = self.networkHandler.playerId
         else:
           self.playerId = 0
-          
+        if(self.playerId == 0):
+    	  self.running = True
+    	else:
+    	  self.running = False
           
 
         base.disableMouse()
@@ -481,9 +484,13 @@ class World(DirectObject):
               self.frames[frame].append(lambda:self.applyIntent(intent))
           elif tag == "PlayerJoined":
               self.addPlayer(playerId, data)
-              #self.networkHandler.sendGamePacket(("LevelSync", pickle.dumps(currentIntent)))
+              #TODO Switch the host to another player if host leaves
+              if (self.playerId == 0):
+             	  gameState = self.save()
+	          self.networkHandler.sendGamePacket(("LevelSync", gameState), playerId)
           elif tag == "LevelSync":
-              pass
+              self.restore(data)
+              self.running = True
           elif tag == "NewFrame":
               lastFrame = frame -1
               if lastFrame in self.frames:
@@ -503,7 +510,7 @@ class World(DirectObject):
           
         #TODO add something here so that we leave an extra frame of delay that we can use
         #  when a frame is delayed from the server (actually the way I'm doing the frames like this is kinda bad)
-        while len(self.frameQueue) > 0:
+        while len(self.frameQueue) > 0 and self.running:
             self.processFrame(self.frameQueue.pop(0))
         return task.cont
       
